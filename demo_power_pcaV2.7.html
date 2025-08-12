@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PCA + Power + Mahalanobis (interactive demo, v2.9)</title>
+<style>
+  :root{ --bg:#0b1020; --panel:#121a33; --ink:#e8ecff; --muted:#a8b1d8; --accent:#7dd3fc; --accent2:#c084fc; --good:#34d399; --warn:#f59e0b; --bad:#fb7185; }
+  html,body{height:100%}
+  body{margin:0; font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; background:var(--bg); color:var(--ink)}
+  .wrap{display:grid; grid-template-columns:360px 1fr; gap:16px; height:100%}
+  aside{background:var(--panel); padding:16px; overflow:auto; border-right:1px solid #1c2550}
+  main{padding:16px; overflow:auto}
+  h1{font-size:18px; margin:0 0 8px}
+  h2{font-size:15px; margin:14px 0 6px; color:var(--muted)}
+  .row{margin:8px 0; position:relative}
+  label{display:flex; justify-content:space-between; align-items:center; gap:8px}
+  input[type=number]{width:90px}
+  input[type=range]{width:100%}
+  .btns{display:flex; flex-wrap:wrap; gap:8px; margin-top:8px}
+  button{background:linear-gradient(135deg,var(--accent2),var(--accent)); border:none; color:#0a0830; padding:8px 10px; border-radius:10px; cursor:pointer; font-weight:600}
+  button.secondary{background:#1d284f; color:var(--ink); border:1px solid #2a3770}
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  .card{background:var(--panel); border:1px solid #1c2550; border-radius:14px; padding:12px}
+  canvas{background:#0c132b; border-radius:12px; width:100%; height:380px}
+  .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+  .pill{display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px}
+  .ok{background:rgba(52,211,153,.15); color:var(--good); border:1px solid rgba(52,211,153,.35)}
+  .warn{background:rgba(245,158,11,.15); color:var(--warn); border:1px solid rgba(245,158,11,.35)}
+  .bad{background:rgba(251,113,133,.15); color:var(--bad); border:1px solid rgba(251,113,133,.35)}
+  .legend{display:flex; gap:10px; align-items:center; font-size:12px; color:var(--muted)}
+  .dot{width:10px; height:10px; border-radius:50%}
+  .help{display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; margin-left:6px; border-radius:50%; background:#2a3770; color:#e6ebff; font-size:12px; cursor:help; user-select:none}
+  .help[data-tip]:hover::after{content:attr(data-tip); position:absolute; left:22px; top:100%; z-index:10; background:#0b1020; color:#e8ecff; border:1px solid #2a3770; padding:8px 10px; border-radius:8px; width:min(320px,60vw); box-shadow:0 12px 28px rgba(0,0,0,.35)}
+  .note{color:var(--muted); font-size:12px; margin-top:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside>
+    <h1>Frozen PCA + Power + Outliers</h1>
+    <div class="row">Fit PCA only on <b>reference species</b> A &amp; B, then project everyone. Adjust knobs, regenerate, and see power and detection change. Hover <span class="help" data-tip="Every control has a short tooltip. Move your mouse over this icon to learn what a control does.">ⓘ</span> for help.</div>
+
+    <h2>Data generation</h2>
+    <div class="row"><label>Features (p_total)
+      <span class="help" data-tip="Total number of raw measurement axes before PCA (e.g., PCs from wing + mandible + ratios).">ⓘ</span>
+      <input id="pTotal" type="range" min="2" max="30" value="12" oninput="this.nextElementSibling.textContent=this.value"><output id="pTotalOut" class="mono">12</output></label></div>
+
+    <div class="row"><label>Informative dims (m)
+      <span class="help" data-tip="How many of the p_total axes actually separate A and B. The rest are noise.">ⓘ</span>
+      <input id="mDims" type="range" min="1" max="12" value="4" oninput="this.nextElementSibling.textContent=this.value"><output id="mDimsOut" class="mono">4</output></label></div>
+
+    <div class="row"><label>Between-class effect (Δ)
+      <span class="help" data-tip="How far B is from A on the informative axes (in standard deviations). Bigger Δ = easier separation & higher power.">ⓘ</span>
+      <input id="delta" type="range" min="0" max="3" step="0.05" value="1.2" oninput="this.nextElementSibling.textContent=this.value"><output id="deltaOut" class="mono">1.2</output></label></div>
+
+    <div class="row"><label>Within-class SD (σ)
+      <span class="help" data-tip="Noise inside each species. Higher σ spreads the clouds and makes separation harder.">ⓘ</span>
+      <input id="sigma" type="range" min="0.1" max="2" step="0.05" value="0.6" oninput="this.nextElementSibling.textContent=this.value"><output id="sigmaOut" class="mono">0.6</output></label></div>
+
+    <div class="row"><label>Reference n<sub>A</sub>
+      <span class="help" data-tip="How many specimens of species A to build & freeze the PCA basis.">ⓘ</span>
+      <input id="nA" type="range" min="4" max="80" value="20" oninput="this.nextElementSibling.textContent=this.value"><output id="nAOut" class="mono">20</output></label></div>
+
+    <div class="row"><label>Reference n<sub>B</sub>
+      <span class="help" data-tip="How many specimens of species B to build & freeze the PCA basis.">ⓘ</span>
+      <input id="nB" type="range" min="4" max="80" value="20" oninput="this.nextElementSibling.textContent=this.value"><output id="nBOut" class="mono">20</output></label></div>
+
+    <h2>PCA (frozen)
+      <span class="help" data-tip="We fit PCA only on A & B, then reuse the same axes for everything else (rare species, singletons).">ⓘ</span>
+    </h2>
+    <div class="row"><label>Retained PCs (k)
+      <span class="help" data-tip="How many PCA axes you keep. Too many noisy axes (large k) can reduce power; too few can lose signal.">ⓘ</span>
+      <input id="kPC" type="range" min="1" max="12" value="6" oninput="this.nextElementSibling.textContent=this.value"><output id="kPCOut" class="mono">6</output></label></div>
+    <div class="btns"><button onclick="actions.generate()">1) Generate &amp; Freeze PCA</button></div>
+
+    <h2>Singletons &amp; small groups</h2>
+    <div class="row"><label># singletons
+      <span class="help" data-tip="How many singletons (one-off specimens) to test after PCA is frozen.">ⓘ</span>
+      <input id="nSingletons" type="range" min="0" max="12" value="4" oninput="this.nextElementSibling.textContent=this.value"><output id="nSingletonsOut" class="mono">4</output></label></div>
+
+    <div class="row"><label>Singleton shift vs A (Δ*)
+      <span class="help" data-tip="How different the singleton is from species A along the informative axes. If Δ* is big and MD to A & B is large, it may be a novel form.">ⓘ</span>
+      <input id="deltaSing" type="range" min="0" max="3" step="0.05" value="1.4" oninput="this.nextElementSibling.textContent=this.value"><output id="deltaSingOut" class="mono">1.4</output></label></div>
+
+    <div class="row"><label>Alpha (tests)
+      <span class="help" data-tip="Significance level used for Mahalanobis outlier flagging and Hotelling power threshold.">ⓘ</span>
+      <input id="alpha" type="range" min="0.01" max="0.10" step="0.01" value="0.05" oninput="this.nextElementSibling.textContent=this.value"><output id="alphaOut" class="mono">0.05</output></label></div>
+    <div class="btns"><button class="secondary" onclick="actions.addSingletons()">2) Add singletons &amp; Mahalanobis</button></div>
+
+    <h2>Power &amp; small-group testing</h2>
+    <div class="row"><label>Power sims
+      <span class="help" data-tip="Number of Monte Carlo simulations to estimate the power of Hotelling's T².">ⓘ</span>
+      <input id="sims" type="range" min="200" max="3000" step="100" value="1200" oninput="this.nextElementSibling.textContent=this.value"><output id="simsOut" class="mono">1200</output></label></div>
+
+    <div class="row"><label>Small-group n (vs A)
+      <span class="help" data-tip="Sample size of a small group (e.g., a rare species with 3–10 individuals) compared to A.">ⓘ</span>
+      <input id="nSmall" type="range" min="2" max="20" value="5" oninput="this.nextElementSibling.textContent=this.value"><output id="nSmallOut" class="mono">5</output></label></div>
+
+    <div class="row"><label>Group shift (Δg)
+      <span class="help" data-tip="Mean difference of the small group from A on the informative axes (after projection to the frozen PCA space).">ⓘ</span>
+      <input id="deltaGroup" type="range" min="0" max="3" step="0.05" value="1.0" oninput="this.nextElementSibling.textContent=this.value"><output id="deltaGroupOut" class="mono">1.0</output></label></div>
+
+    <div class="btns">
+      <button class="secondary" onclick="actions.power()">3) Run power (Hotelling T²)</button>
+      <button class="secondary" onclick="actions.powerSmall()">Hotelling T² (small group vs A)</button>
+      <button class="secondary" onclick="actions.energyTest()">E‑test (permutation)</button>
+      <button class="secondary" onclick="actions.resetLog()">Reset log</button>
+    </div>
+
+    <div id="status" class="row mono note"></div>
+  </aside>
+
+  <main>
+    <div class="grid">
+      <div class="card">
+        <div class="legend">
+          <div class="dot" style="background:#60a5fa"></div> A (reference)
+          <div class="dot" style="background:#f472b6"></div> B (reference)
+          <div class="dot" style="background:#34d399"></div> Singletons (tested)
+          <div class="dot" style="background:#fde047"></div> Centroids
+        </div>
+        <canvas id="plot" width="900" height="380"></canvas>
+      </div>
+      <div class="card">
+        <div style="display:flex; gap:8px; align-items:center; justify-content:space-between">
+          <div><b>Results</b></div>
+          <div><span id="pcInfo" class="pill warn">PCA not yet fit</span></div>
+        </div>
+        <pre id="log" class="mono" style="white-space:pre-wrap; max-height:330px; overflow:auto; margin:8px 0 0"></pre>
+        <div id="caption" class="note" style="margin-top:8px">
+          <b>How to read the Results:</b>
+          <ul style="margin:6px 0 0 16px; padding:0 0 0 10px; line-height:1.35">
+            <li><b>Power (Hotelling T²)</b>: the estimated chance (0–100%) that a two‑sample T² test will detect a difference at your chosen α, given the current sample sizes and the effect size implied by your sliders. Values ≥ ~80% are often considered adequate.</li>
+            <li><b>T²<sub>crit</sub></b>: the rejection threshold under the null (computed by simulation). Your observed T² would need to exceed this to be called significant.</li>
+            <li><b>Singletons: MD²</b>: Mahalanobis distance squared from the A/B centroids in the frozen PCA space. If MD² exceeds the χ² threshold with df = k retained PCs, it’s flagged as a potential outlier (candidate novel form).</li>
+            <li><b>E‑test</b>: a nonparametric two‑sample energy‑distance test. Smaller p‑values indicate stronger separation; it doesn’t assume normality.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+"use strict";
+// Expose a global placeholder so inline oninput never throws
+window.ui = window.ui || {};
+
+// Global error hooks to report line/column
+window.onerror = function(message, source, lineno, colno, error){
+  const where = `${source?.split('/').pop()||'inline'}:${lineno||'?'}:${colno||'?'}`;
+  const msg = `[JS error] ${message} @ ${where}` + (error && error.stack? `\n${error.stack}` : '');
+  try{ document.getElementById('log').textContent += (document.getElementById('log').textContent?'\n':'') + msg; document.getElementById('status').textContent='Error — see Results panel.'; }catch(_){/* ignore */}
+  return false; // still show in console
+};
+window.addEventListener('unhandledrejection', e=>{
+  const msg = `[Promise rejection] ${e.reason?.message||e.reason}`;
+  try{ document.getElementById('log').textContent += (document.getElementById('log').textContent?'\n':'') + msg; document.getElementById('status').textContent='Error — see Results panel.'; }catch(_){/* ignore */}
+});
+
+// ---------- Small linear algebra helpers ----------
+const la = {
+  mean: (X)=>{ const n=X.length, p=X[0].length; const m=new Array(p).fill(0); for(let i=0;i<n;i++) for(let j=0;j<p;j++) m[j]+=X[i][j]; for(let j=0;j<p;j++) m[j]/=n; return m; },
+  subMean: (X,m)=> X.map(r=>r.map((v,j)=>v-m[j])),
+  cov: (X)=>{ const n=X.length, p=X[0].length; const C=Array.from({length:p},()=>Array(p).fill(0)); const mu=la.mean(X); for(let i=0;i<n;i++){ const r=X[i].map((v,j)=>v-mu[j]); for(let a=0;a<p;a++) for(let b=a;b<p;b++){ C[a][b]+=r[a]*r[b]; } } for(let a=0;a<p;a++){ for(let b=a;b<p;b++){ C[a][b]=(C[a][b]/(n-1)); C[b][a]=C[a][b]; } } return C; },
+  dot:(a,b)=>{let s=0; for(let i=0;i<a.length;i++) s+=a[i]*b[i]; return s;},
+  matmul:(A,B)=>{ const n=A.length,p=A[0].length,m=B[0].length; const R=Array.from({length:n},()=>Array(m).fill(0)); for(let i=0;i<n;i++){ for(let k=0;k<p;k++){ const aik=A[i][k]; for(let j=0;j<m;j++) R[i][j]+=aik*B[k][j]; } } return R;},
+  transpose:(A)=> A[0].map((_,j)=>A.map(r=>r[j])),
+  eye:(p)=>{const I=Array.from({length:p},()=>Array(p).fill(0)); for(let i=0;i<p;i++) I[i][i]=1; return I;},
+  clone:(A)=>A.map(r=>r.slice()),
+  inv:(A)=>{ const n=A.length; const M=la.clone(A); const I=la.eye(n);
+    for(let i=0;i<n;i++){
+      let maxR=i; for(let r=i+1;r<n;r++) if(Math.abs(M[r][i])>Math.abs(M[maxR][i])) maxR=r;
+      if (Math.abs(M[maxR][i])<1e-12) return null;
+      if (maxR!==i){ [M[i],M[maxR]]=[M[maxR],M[i]]; [I[i],I[maxR]]=[I[maxR],I[i]]; }
+      const piv=M[i][i]; for(let j=0;j<n;j++){ M[i][j]/=piv; I[i][j]/=piv; }
+      for(let r=0;r<n;r++) if(r!==i){ const f=M[r][i]; for(let j=0;j<n;j++){ M[r][j]-=f*M[i][j]; I[r][j]-=f*I[i][j]; } }
+    }
+    return I;
+  },
+  eigSym:(A, maxIter=120, eps=1e-10)=>{ const n=A.length; let V=la.eye(n); let B=la.clone(A);
+    for(let iter=0; iter<maxIter; iter++){
+      let p=0,q=1,max=0; for(let i=0;i<n;i++) for(let j=i+1;j<n;j++){ const val=Math.abs(B[i][j]); if(val>max){ max=val; p=i; q=j; } }
+      if(max<eps) break;
+      const theta=0.5*Math.atan2(2*B[p][q], B[q][q]-B[p][p]); const c=Math.cos(theta), s=Math.sin(theta);
+      const Bp=B[p].slice(), Bq=B[q].slice();
+      for(let k=0;k<n;k++){ const bpk=Bp[k], bqk=Bq[k]; B[p][k]=c*bpk - s*bqk; B[q][k]=s*bpk + c*bqk; }
+      for(let k=0;k<n;k++){ const bkp=B[k][p], bkq=B[k][q]; B[k][p]=c*bkp - s*bkq; B[k][q]=s*bkp + c*bkq; }
+      for(let k=0;k<n;k++){ const vkp=V[k][p], vkq=V[k][q]; V[k][p]=c*vkp - s*vkq; V[k][q]=s*vkp + c*vkq; }
+    }
+    const vals=B.map((r,i)=>r[i]); return {values:vals, vectors:V};
+  }
+};
+
+// ---------- Random helpers ----------
+const rng = {u:()=>Math.random(), n:()=>{const u1=Math.random(), u2=Math.random(); return Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2);} };
+function sampleMVN(mu, sigma, n){ const p=mu.length; const out=[]; for(let i=0;i<n;i++){ const r=new Array(p); for(let j=0;j<p;j++){ r[j]=mu[j] + sigma*rng.n(); } out.push(r);} return out; }
+
+// ---------- PCA fit on reference only ----------
+function fitFrozenPCA(Xref, k){
+  const C=la.cov(Xref); const {values, vectors}=la.eigSym(C);
+  const idx=[...values.keys()].sort((a,b)=>values[b]-values[a]);
+  const eigvals=idx.map(i=>values[i]); const eigvecs=idx.map(i=>vectors.map(row=>row[i]));
+  const W=eigvecs.slice(0, k); const WT=la.transpose(W);
+  const mean=la.mean(Xref);
+  return {mean, WT, eigvals};
+}
+function transformPCA(X, pca){ const X0=la.subMean(X, pca.mean); return la.matmul(X0, pca.WT); }
+
+// ---------- Mahalanobis & power ----------
+function covMat(X){ return la.cov(X); }
+function pooledCov(A,B){ const nA=A.length, nB=B.length; const SA=covMat(A), SB=covMat(B); const p=SA.length; const S=Array.from({length:p},()=>Array(p).fill(0)); for(let i=0;i<p;i++) for(let j=0;j<p;j++) S[i][j]=((nA-1)*SA[i][j]+(nB-1)*SB[i][j])/(nA+nB-2); return S; }
+function maha2(x, mu, Sinv){ const d=x.map((v,i)=>v-mu[i]); const y=Sinv.map(row=>la.dot(row,d)); return la.dot(d,y); }
+
+// Stable normal inverse CDF (Acklam) without deep nesting to avoid stray parens
+function normInv(p){
+  const a0=-39.69683028665376, a1=220.9460984245205, a2=-275.9285104469687, a3=138.3577518672690, a4=-30.66479130614500, a5=2.506628277459239;
+  const b0=-54.47609879822406, b1=161.5858368580409, b2=-155.6989798598866, b3=66.80131188771972, b4=-13.28068155288572;
+  const c0=-0.007784894002430293, c1=-0.3223964580411365, c2=-2.400758277161838, c3=-2.549732539343734, c4=4.374664141464968, c5=2.938163982698783;
+  const d0=0.007784695709041462, d1=0.3224671290700398, d2=2.445134137142996, d3=3.754408661907416;
+  const plow=0.02425, phigh=1-plow;
+  let q, r;
+  if(p<plow){
+    q=Math.sqrt(-2*Math.log(p));
+    return (((((c0*q + c1)*q + c2)*q + c3)*q + c4)*q + c5) /
+           (((d0*q + d1)*q + d2)*q + d3)*q + 1; // intentionally linearized below
+  }
+  if(p>phigh){
+    q=Math.sqrt(-2*Math.log(1-p));
+    return -(((((c0*q + c1)*q + c2)*q + c3)*q + c4)*q + c5) /
+            ((((d0*q + d1)*q + d2)*q + d3)*q + 1);
+  }
+  q=p-0.5; r=q*q;
+  return (((((a0*r + a1)*r + a2)*r + a3)*r + a4)*r + a5) * q /
+         (((((b0*r + b1)*r + b2)*r + b3)*r + b4)*r + 1);
+}
+function chi2Quantile(p, df){ const z=normInv(p); const a=1-2/(9*df)+z*Math.sqrt(2/(9*df)); return df*Math.pow(a,3); }
+
+function cholSymPD(S){ const n=S.length; const L=Array.from({length:n},()=>Array(n).fill(0)); for(let i=0;i<n;i++){ for(let j=0;j<=i;j++){ let sum=S[i][j]; for(let k=0;k<j;k++) sum-=L[i][k]*L[j][k]; if(i===j){ if(sum<=1e-12) sum=1e-8; L[i][j]=Math.sqrt(sum);} else { L[i][j]=sum/L[j][j]; } } } return L; }
+function mulVec(L,z){ const n=L.length; const y=new Array(n).fill(0); for(let i=0;i<n;i++){ let s=0; for(let k=0;k<=i;k++) s+=L[i][k]*z[k]; y[i]=s; } return y; }
+function hotellingsT2(A,B){ const nA=A.length, nB=B.length; const p=A[0].length; const muA=la.mean(A), muB=la.mean(B); const SA=covMat(A), SB=covMat(B); const Sp=Array.from({length:p},()=>Array(p).fill(0)); for(let i=0;i<p;i++) for(let j=0;j<p;j++) Sp[i][j]=((nA-1)*SA[i][j]+(nB-1)*SB[i][j])/(nA+nB-2); const inv=la.inv(Sp); if(!inv) return 0; const d=muA.map((v,i)=>v-muB[i]); const y=inv.map(row=>la.dot(row,d)); return (nA*nB/(nA+nB))*la.dot(d,y); }
+function hotellingsPower(muA, muB, Sigma, nA, nB, alpha, sims){ const p=muA.length; const L=cholSymPD(Sigma);
+  const sample=(mu,n)=>{ const out=[]; for(let i=0;i<n;i++){ const z=new Array(p).fill(0).map(()=>rng.n()); const x=mulVec(L,z).map((v,j)=>v+mu[j]); out.push(x);} return out; };
+  const simsH0=Math.max(400, Math.floor(sims/3)); const T2s=[]; for(let i=0;i<simsH0;i++){ const A=sample(muA,nA), B=sample(muA,nB); T2s.push(hotellingsT2(A,B)); }
+  T2s.sort((a,b)=>a-b); const idx=Math.max(0, Math.min(T2s.length-1, Math.floor((1-alpha)*T2s.length))); const T2crit=T2s[idx];
+  let rej=0; for(let b=0;b<sims;b++){ const A1=sample(muA,nA), B1=sample(muB,nB); const T2=hotellingsT2(A1,B1); if(T2>T2crit) rej++; }
+  return {power:rej/sims, T2crit};
+}
+
+// ---------- Energy distance (permutation) ----------
+function energyTest(X,Y, perms=400){ const nx=X.length, ny=Y.length; const both=X.concat(Y);
+  const dist=(a,b)=> Math.hypot(...a.map((v,i)=>v-b[i]));
+  let sumXY=0, cntXY=0; for(let i=0;i<nx;i++) for(let j=0;j<ny;j++){ sumXY+=dist(X[i],Y[j]); cntXY++; }
+  let sumXX=0, cntXX=0; for(let i=0;i<nx;i++) for(let j=0;j<i;j++){ sumXX+=dist(X[i],X[j]); cntXX++; }
+  let sumYY=0, cntYY=0; for(let i=0;i<ny;i++) for(let j=0;j<i;j++){ sumYY+=dist(Y[i],Y[j]); cntYY++; }
+  const stat = 2*sumXY/cntXY - sumXX/cntXX - sumYY/cntYY;
+  let gt=0; for(let b=0;b<perms;b++){
+    const idx=[...Array(nx+ny).keys()].sort(()=>Math.random()-0.5);
+    const Xp=idx.slice(0,nx).map(i=>both[i]); const Yp=idx.slice(nx).map(i=>both[i]);
+    let sXY=0,cXY=0; for(let i=0;i<nx;i++) for(let j=0;j<ny;j++){ sXY+=dist(Xp[i],Yp[j]); cXY++; }
+    let sXX=0,cXX=0; for(let i=0;i<nx;i++) for(let j=0;j<i;j++){ sXX+=dist(Xp[i],Xp[j]); cXX++; }
+    let sYY=0,cYY=0; for(let i=0;i<ny;i++) for(let j=0;j<i;j++){ sYY+=dist(Yp[i],Yp[j]); cYY++; }
+    const st=2*sXY/cXY - sXX/cXX - sYY/cYY; if(st>=stat) gt++;
+  }
+  const p=(gt+1)/(perms+1); return {stat, p};
+}
+
+// ---------- UI + actions ----------
+window.addEventListener('DOMContentLoaded', function(){
+  // Fill the global ui map once elements exist
+  window.ui = {
+    pTotal: document.getElementById('pTotal'), pTotalOut: document.getElementById('pTotalOut'),
+    mDims: document.getElementById('mDims'), mDimsOut: document.getElementById('mDimsOut'),
+    delta: document.getElementById('delta'), deltaOut: document.getElementById('deltaOut'),
+    sigma: document.getElementById('sigma'), sigmaOut: document.getElementById('sigmaOut'),
+    nA: document.getElementById('nA'), nAOut: document.getElementById('nAOut'),
+    nB: document.getElementById('nB'), nBOut: document.getElementById('nBOut'),
+    kPC: document.getElementById('kPC'), kPCOut: document.getElementById('kPCOut'),
+    nSingletons: document.getElementById('nSingletons'), nSingletonsOut: document.getElementById('nSingletonsOut'),
+    deltaSing: document.getElementById('deltaSing'), deltaSingOut: document.getElementById('deltaSingOut'),
+    alpha: document.getElementById('alpha'), alphaOut: document.getElementById('alphaOut'),
+    sims: document.getElementById('sims'), simsOut: document.getElementById('simsOut'),
+    nSmall: document.getElementById('nSmall'), nSmallOut: document.getElementById('nSmallOut'),
+    deltaGroup: document.getElementById('deltaGroup'), deltaGroupOut: document.getElementById('deltaGroupOut'),
+    plot: document.getElementById('plot'), log: document.getElementById('log'), status: document.getElementById('status'), pcInfo: document.getElementById('pcInfo')
+  };
+
+  const state = {X_A:[], X_B:[], pca:null, k:6, pooledS:null, invS:null, muA:null, muB:null, singletons:[], PCs_AB:[], PCs_S:[]};
+  function log(msg){ ui.log.textContent = msg; }
+  function append(msg){ ui.log.textContent += (ui.log.textContent?"\n":"") + msg; ui.log.scrollTop = ui.log.scrollHeight; }
+
+  function drawScatter(PC_AB, PC_S, muA, muB){
+    const ctx=ui.plot.getContext('2d'); const w=ui.plot.width, h=ui.plot.height; ctx.clearRect(0,0,w,h);
+    const all=PC_AB.map(o=>[o.x,o.y]).concat(PC_S);
+    const xs=all.map(r=>r[0]).concat(muA?muA[0]:0, muB?muB[0]:0);
+    const ys=all.map(r=>r[1]).concat(muA?muA[1]:0, muB?muB[1]:0);
+    const minx=Math.min(...xs), maxx=Math.max(...xs), miny=Math.min(...ys), maxy=Math.max(...ys);
+    const padX=0.15*(maxx-minx||1), padY=0.15*(maxy-miny||1);
+    const x0=minx-padX, x1=maxx+padX, y0=miny-padY, y1=maxy+padY;
+    const X=x=> (x-x0)/(x1-x0)*w; const Y=y=> h-(y-y0)/(y1-y0)*h;
+    ctx.strokeStyle="#1f2a5e"; ctx.lineWidth=1; for(let i=0;i<6;i++){ const gx=w*i/5, gy=h*i/5; ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,h); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(w,gy); ctx.stroke(); }
+    ctx.fillStyle="#60a5fa"; for(const r of PC_AB.filter(o=>o.c==='A')){ ctx.beginPath(); ctx.arc(X(r.x),Y(r.y),3,0,6.283); ctx.fill(); }
+    ctx.fillStyle="#f472b6"; for(const r of PC_AB.filter(o=>o.c==='B')){ ctx.beginPath(); ctx.arc(X(r.x),Y(r.y),3,0,6.283); ctx.fill(); }
+    ctx.fillStyle="#34d399"; for(const r of PC_S){ ctx.beginPath(); ctx.arc(X(r[0]),Y(r[1]),4,0,6.283); ctx.fill(); }
+    ctx.fillStyle="#fde047"; if(muA&&muB){ for(const m of [muA,muB]){ ctx.beginPath(); ctx.arc(X(m[0]),Y(m[1]),5,0,6.283); ctx.fill(); } }
+  }
+
+  // Safe wrapper to log exceptions with line numbers
+  const safe = (name, fn)=> function(...args){ try{ return fn.apply(this,args); }catch(e){ append(`[${name}] ${e.message}` + (e.stack? `\n${e.stack}`:'')); ui.status.textContent='Error — see Results for details.'; throw e; } };
+
+  const actionsRaw = {
+    generate(){
+      const p=parseInt(ui.pTotal.value,10);
+      ui.kPC.max = String(Math.min(12,p)); if(parseInt(ui.kPC.value,10)>parseInt(ui.kPC.max,10)) ui.kPC.value=ui.kPC.max; ui.kPCOut.textContent=ui.kPC.value;
+      ui.mDims.max = String(p); if(parseInt(ui.mDims.value,10)>p) ui.mDims.value=String(p); ui.mDimsOut.textContent=ui.mDims.value;
+
+      const m=parseInt(ui.mDims.value,10), delta=parseFloat(ui.delta.value), sigma=parseFloat(ui.sigma.value);
+      const nA=parseInt(ui.nA.value,10), nB=parseInt(ui.nB.value,10), k=parseInt(ui.kPC.value,10);
+
+      const muA=new Array(p).fill(0); const muB=muA.slice(); for(let j=0;j<m;j++) muB[j]=delta;
+      const X_A=sampleMVN(muA, sigma, nA); const X_B=sampleMVN(muB, sigma, nB);
+      const X_ref=X_A.concat(X_B); const pca=fitFrozenPCA(X_ref,k);
+      const PCsA=transformPCA(X_A, pca); const PCsB=transformPCA(X_B, pca);
+      const S=pooledCov(PCsA,PCsB); const invS=la.inv(S);
+
+      state.X_A=X_A; state.X_B=X_B; state.pca=pca; state.k=k; state.pooledS=S; state.invS=invS;
+      const muApc=la.mean(PCsA), muBpc=la.mean(PCsB); state.muA=muApc; state.muB=muBpc; state.PCs_AB=[]; state.PCs_S=[];
+      for(const r of PCsA) state.PCs_AB.push({x:r[0],y:r[1],c:'A'});
+      for(const r of PCsB) state.PCs_AB.push({x:r[0],y:r[1],c:'B'});
+      drawScatter(state.PCs_AB, [], muApc, muBpc);
+      ui.pcInfo.textContent=`PCA frozen on A+B (k=${k})`; ui.pcInfo.className='pill ok';
+      log(`PCA frozen (nA=${nA}, nB=${nB}, p_total=${p}, m=${m}, Δ=${delta}, σ=${sigma}).
+`
+        +`Explained variance (first 4 PCs): ${pca.eigvals.slice(0,4).map(v=>v.toFixed(3)).join(', ')}
+`
+        +`Centroid distance (PC1..k): ${Math.hypot(...muBpc.map((v,i)=>v-muApc[i])).toFixed(2)}`);
+      ui.status.textContent='Reference generated. PCA frozen.';
+    },
+    addSingletons(){
+      if(!state.pca){ ui.status.textContent='Generate reference first.'; return; }
+      const s=parseInt(ui.nSingletons.value,10), deltaS=parseFloat(ui.deltaSing.value), sigma=parseFloat(ui.sigma.value);
+      const p=parseInt(ui.pTotal.value,10), m=parseInt(ui.mDims.value,10);
+      const muS=new Array(p).fill(0); for(let j=0;j<m;j++) muS[j]=deltaS;
+      const X_S=sampleMVN(muS, sigma, s); const PCsS=transformPCA(X_S, state.pca); state.PCs_S=PCsS;
+      drawScatter(state.PCs_AB, PCsS, state.muA, state.muB);
+      const alpha=parseFloat(ui.alpha.value), df=state.k; const thr=chi2Quantile(1-alpha, df);
+      let out=`Singletons: MD² threshold (df=${df}) ≈ ${thr.toFixed(2)} (α=${alpha}).`;
+      for(let i=0;i<PCsS.length;i++){
+        const x=PCsS[i]; const dA=maha2(x,state.muA,state.invS); const dB=maha2(x,state.muB,state.invS);
+        const flag=(dA>thr && dB>thr)?'OUTLIER (novel?)':(dA<dB?'near A':'near B');
+        out+=`
+  s${i+1}: MD²_A=${dA.toFixed(2)}, MD²_B=${dB.toFixed(2)} → ${flag}`;
+      }
+      append(out); ui.status.textContent='Singletons tested.';
+    },
+    power(){
+      if(!state.pca){ ui.status.textContent='Generate reference first.'; return; }
+      const sims=parseInt(ui.sims.value,10), alpha=parseFloat(ui.alpha.value);
+      const nA=parseInt(ui.nA.value,10), nB=parseInt(ui.nB.value,10);
+      const res=hotellingsPower(state.muA,state.muB,state.pooledS,nA,nB,alpha,sims);
+      append(`Power (Hotelling T²) nA=${nA}, nB=${nB}, α=${alpha}: ≈ ${(100*res.power).toFixed(1)}% (T²_crit≈${res.T2crit.toFixed(2)})`);
+      ui.status.textContent='Power computed.';
+    },
+    powerSmall(){
+      if(!state.pca){ ui.status.textContent='Generate reference first.'; return; }
+      const sims=parseInt(ui.sims.value,10), alpha=parseFloat(ui.alpha.value);
+      const nRef=parseInt(ui.nA.value,10), nSmall=parseInt(ui.nSmall.value,10);
+      const p=parseInt(ui.pTotal.value,10), m=parseInt(ui.mDims.value,10), deltaG=parseFloat(ui.deltaGroup.value);
+      // Define a hypothetical small-group mean in raw space and project to frozen PC space
+      const muG_raw=new Array(p).fill(0); for(let j=0;j<m;j++) muG_raw[j]=deltaG;
+      const muG_pc=transformPCA([muG_raw], state.pca)[0];
+      const res=hotellingsPower(state.muA, muG_pc, state.pooledS, nRef, nSmall, alpha, sims);
+      append(`Power (T²) small group vs A — n_ref=${nRef}, n_small=${nSmall}, Δg=${deltaG}, α=${alpha}: ≈ ${(100*res.power).toFixed(1)}% (T²_crit≈${res.T2crit.toFixed(2)})`);
+      ui.status.textContent='Power (small group vs A) computed.';
+    },
+    energyTest(){
+      if(!state.pca){ ui.status.textContent='Generate reference first.'; return; }
+      const n=parseInt(ui.nSmall.value,10), deltaG=parseFloat(ui.deltaGroup.value), sigma=parseFloat(ui.sigma.value);
+      const p=parseInt(ui.pTotal.value,10), m=parseInt(ui.mDims.value,10);
+      const muG=new Array(p).fill(0); for(let j=0;j<m;j++) muG[j]=deltaG;
+      const Xg=sampleMVN(muG, sigma, n); const PCsG=transformPCA(Xg, state.pca); const PCsA=transformPCA(state.X_A, state.pca);
+      const Atrim=PCsA.slice(0, Math.max(n, Math.min(PCsA.length, 40)));
+      const res=energyTest(PCsG, Atrim, 300);
+      append(`Energy distance vs A (n=${n}, Δg=${deltaG}): stat=${res.stat.toFixed(3)}, p≈${res.p.toFixed(3)} (perm=300)`);
+      ui.status.textContent='E-test complete.';
+    },
+    resetLog(){ log(''); ui.status.textContent=''; }
+  };
+
+
+  // Wrap actions with safe() to surface line numbers on errors
+  const actions = {
+    generate: safe('generate', actionsRaw.generate),
+    addSingletons: safe('addSingletons', actionsRaw.addSingletons),
+    power: safe('power', actionsRaw.power),
+    powerSmall: safe('powerSmall', actionsRaw.powerSmall),
+    energyTest: safe('energyTest', actionsRaw.energyTest),
+    resetLog: safe('resetLog', actionsRaw.resetLog)
+  };
+  window.actions = actions; // expose for inline onclick
+
+  // Self-tests then default run
+  try{ const I=la.eye(3); const invI=la.inv(I); append('[self-test] inv(I) ok='+!!invI); }catch(e){ append('[self-test] inv exception '+e.message); }
+  try{ const q90=chi2Quantile(0.90,2).toFixed(2), q95=chi2Quantile(0.95,2).toFixed(2); append('[self-test] chi2 q90='+q90+' q95='+q95); }catch(e){ append('[self-test] chi2 exception '+e.message); }
+  try{ const S=[[1,0],[0,1]]; const Sinv=la.inv(S); const md=maha2([1,0],[0,0],Sinv).toFixed(2); append('[self-test] MD²(1,0)='+md); }catch(e){ append('[self-test] MD exception '+e.message); }
+  setTimeout(()=>actions.generate(), 50);
+});
+</script>
+</body>
+</html>

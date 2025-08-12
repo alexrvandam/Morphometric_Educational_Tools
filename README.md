@@ -2,7 +2,8 @@
 Simulate different morphological species scenarios for PCA clustering
 
 How To:
-Simply right click and open in your browser
+Simply download the .html file and then right click it and open in your browser.
+
 Explore how morphological variation within and between species affects our ability
 to cluster them via PCA and then assign new species via Mahanalobis Clustering
 Explore how sample size affects the power of the features used to discriminate 
